@@ -71,7 +71,7 @@ type ZHintFile interface {
     Path() string
     FileId() uint64
     Size()  int64
-    //ReadZHintRecordAt(offset int64) (*ZHintRecord, error)
+    ReadZHintRecordAt(offset int64) (*ZHintRecord, error)
     WriteZHintRecord(key []byte, tv *TableValue) error
     Close() error
 }

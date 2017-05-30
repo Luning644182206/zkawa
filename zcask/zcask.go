@@ -395,12 +395,14 @@ func (z *ZCask) loadFromHintFile(fileId uint64, filePath string) error {
     timestamp := getCurrentUnixNano()
 
     var err error
+    var zhf ZHintFile
 
     hf, err := NewHintFile(fileId, filePath, HintFileReadOnlyMode)
     if err != nil {
         return err
     }
-    defer hf.Close()
+    zhf = hf
+    defer zhf.Close()
 
     dataFilePath := z.getDataFilePathById(fileId)
     odf, err := z.getOldDataFile(dataFilePath)
@@ -408,10 +410,10 @@ func (z *ZCask) loadFromHintFile(fileId uint64, filePath string) error {
         return err
     }
 
-    fileSize := hf.Size()
+    fileSize := zhf.Size()
     var zhr *ZHintRecord
     for  offset := int64(0); offset < fileSize; offset += int64(zhr.Size()) {
-        zhr, err = hf.ReadZHintRecordAt(offset)
+        zhr, err = zhf.ReadZHintRecordAt(offset)
         if err != nil {
             return err
         }
