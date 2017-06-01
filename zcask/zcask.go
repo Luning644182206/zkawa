@@ -311,7 +311,7 @@ func (z *ZCask) mergeFromDataFile(fid uint64) error {
     for offset := int64(0); offset < size; offset += int64(zr.Size()) {
         zr, err = odf.ReadZRecordAt(offset)
         if err != nil {
-            continue
+            return err
         }
         key := string(zr.Key)
         tv, err := z.table.Get(key, timestamp)
