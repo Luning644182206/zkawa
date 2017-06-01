@@ -17,6 +17,7 @@ import (
     "strconv"
     "strings"
     "sync"
+    "sync/atomic"
 )
 
 const (
@@ -57,7 +58,8 @@ type ZCask struct {
     table               *HashTable
     activeTable         *HashTable
     rwMutex             sync.RWMutex
-    loadMutex           sync.RWMutex
+    isMerging           int32               // whether is merging, atomic
+    wgHinting           sync.WaitGroup      // counter of hinting goroutine
 }
 
 func NewZCask(opt Option) (*ZCask, error) {
@@ -88,8 +90,9 @@ func NewZCask(opt Option) (*ZCask, error) {
         activeTable:    at,
         fileCache:      fc,
         table:          t,
+        isMerging:      0,
         // rwMutex
-        // loadMutex
+        // wgHinting
     }, nil
 }
 
@@ -126,6 +129,8 @@ func (z *ZCask) Start() error {
 }
 
 func (z *ZCask) ShutDown() error {
+    z.wgHinting.Wait()
+
     z.rwMutex.Lock()
     defer z.rwMutex.Unlock()
 
@@ -184,6 +189,13 @@ func (z *ZCask) Load() error {
 }
 
 func (z *ZCask) Merge() error {
+    // make sure only one merge running
+	if !atomic.CompareAndSwapInt32(&z.isMerging, 0, 1) {
+		log.Printf("there is a merge process running.")
+		return nil
+	}
+	defer atomic.CompareAndSwapInt32(&z.isMerging, 1, 0)
+
     z.rwMutex.Lock()
     fis, err := ioutil.ReadDir(z.option.DataFileDirectory)
     if err != nil {
@@ -299,9 +311,8 @@ func (z *ZCask) mergeFromDataFile(fid uint64) error {
     for offset := int64(0); offset < size; offset += int64(zr.Size()) {
         zr, err = odf.ReadZRecordAt(offset)
         if err != nil {
-            return err
+            continue
         }
-
         key := string(zr.Key)
         tv, err := z.table.Get(key, timestamp)
         if err == errorKeyNotExisted {
@@ -310,12 +321,10 @@ func (z *ZCask) mergeFromDataFile(fid uint64) error {
             z.table.Delete(key)
             continue
         }
-
         if zr.Header.Timestamp < tv.Timestamp {
             // old record, pass
             continue
         }
-
         // valid zrecord, rewrite this record to active data file.
         err = z.setZRecord(key, zr.Value, tv.Timestamp, tv.Expiration, /*isDelete = */false)
         if err != nil {
@@ -327,8 +336,6 @@ func (z *ZCask) mergeFromDataFile(fid uint64) error {
 
     return nil
 }
-
-
 
 func (z *ZCask) load(fileId uint64) error {
     dataFilePath := z.getDataFilePathById(fileId)
@@ -512,18 +519,18 @@ func (z *ZCask) setZRecord(key string, value []byte, timestamp, expiration uint6
 }
 
 func (z *ZCask) freezeActiveDataFile() error {
+    // get file id for hinting
+    fileId := z.activeDataFile.FileId()
     // close active data file
     if err := z.activeDataFile.Close(); err != nil {
         return nil
     }
     // make hint file
-    if err := z.makeHintFile(); err != nil {
+    if err := z.makeHintFile(z.activeTable, fileId); err != nil {
         return err
     }
-    // release active data file
-    if err := z.activeTable.Release(); err != nil {
-        return err
-    }
+    // don't release active table, it was used by hinting.
+    z.activeTable = nil
 
     return nil
 }
@@ -546,8 +553,11 @@ func (z *ZCask) renewActiveDataFile() error {
     return nil
 }
 
-func (z *ZCask) makeHintFile() error {
-    fileId := z.activeDataFile.FileId()
+func (z *ZCask) makeHintFile(activeTable *HashTable, fileId uint64) error {
+    z.wgHinting.Add(1)
+    defer z.wgHinting.Done()
+    defer activeTable.Release()
+
     filePath := z.getHintFilePathById(fileId)
 
     hf, err := NewHintFile(fileId, filePath, HintFileAppendMode)
@@ -557,9 +567,9 @@ func (z *ZCask) makeHintFile() error {
 
     var zhf ZHintFile = hf
     defer zhf.Close()
-    keys := z.activeTable.Keys()
+    keys := activeTable.Keys()
     for _, key := range keys {
-        tv, err := z.activeTable.GetIncludeExpired(key)
+        tv, err := activeTable.GetIncludeExpired(key)
         if err != nil {
             return err
         }

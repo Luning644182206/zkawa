@@ -49,7 +49,7 @@ type ZRecordHeader struct {
     // |crc32 |timestamp |expiration |key size | value size |
     // ------------------------------------------------------
     CRC32       uint32
-    Timestamp   uint64  // unix microsecond, use for `Merge` and `Load`
+    Timestamp   uint64
     Expiration  uint64
     KeySize     uint32
     ValueSize   uint32
