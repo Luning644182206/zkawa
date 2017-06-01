@@ -54,7 +54,6 @@ func assertEqualByteSlice(xbs, ybs []byte, t *testing.T) {
 }
 
 func TestZCaskComprehensive(t *testing.T) {
-    return
     var testDataDirectory  string
     var setTimes           int
     var randomKeys         []string

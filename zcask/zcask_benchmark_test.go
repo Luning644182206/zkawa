@@ -9,6 +9,7 @@ package zcask
 import (
     "log"
     "math/rand"
+    "os"
     "testing"
     "time"
 )
@@ -31,13 +32,13 @@ var (
 func init() {
     log.SetFlags(log.Ldate|log.Ltime|log.Lshortfile)
 
-    operationsNumForBenchmark = 1e2
+    operationsNumForBenchmark = 1e5
 
     randomSetNumForBenchmark  = 1e5
     randomGetNumForBenchmark  = 1e5
 
     keySizeForBenchmark = 9
-    valueSizeForBenchmark = 2048
+    valueSizeForBenchmark = 1024*2
 
     generateKeysForBenchmark(
         operationsNumForBenchmark,
@@ -51,8 +52,7 @@ func init() {
 
 }
 
-func benchmarkRandomSet(b *testing.B) {
-	b.Log("RandomSet:")
+func benchmarkRandomSet(t *testing.T) {
 	begin := time.Now()
 	j := 0
 	for i := 0; i < operationsNumForBenchmark; i++ {
@@ -66,48 +66,47 @@ func benchmarkRandomSet(b *testing.B) {
 	}
 	end := time.Now()
 	d := end.Sub(begin)
-	b.Logf("%d set operation[key: %dB, value: %dB] in %fs\n", operationsNumForBenchmark, keySizeForBenchmark, valueSizeForBenchmark, d.Seconds())
-	b.Logf("average %f qps\n", float64(operationsNumForBenchmark)/d.Seconds())
+	log.Printf("%d set operation[key: %dB, value: %dB] in %fs\n", operationsNumForBenchmark, keySizeForBenchmark, valueSizeForBenchmark, d.Seconds())
+	log.Printf("average %f qps\n", float64(operationsNumForBenchmark)/d.Seconds())
 	writeMB := int64(operationsNumForBenchmark) * int64(valueSizeForBenchmark) / 1e6
-	b.Logf("average %f MB/s\n", float64(writeMB)/d.Seconds())
-	b.Logf("average %f micros/op\n", d.Seconds()*1e6/float64(operationsNumForBenchmark))
+	log.Printf("average %f MB/s\n", float64(writeMB)/d.Seconds())
+	log.Printf("average %f micros/op\n", d.Seconds()*1e6/float64(operationsNumForBenchmark))
 }
 
-func benchmarkRandomGet(b *testing.B) {
-	b.Log("RandomGet:")
+func benchmarkRandomGet(t *testing.T) {
 	begin := time.Now()
 	for i := 0; i < operationsNumForBenchmark; i++ {
 		r := rand.Intn(len(keysForBenchmark))
-		if _, err := zForBenchmark.Get(keysForBenchmark[r]); err != nil {
-			b.Fatalf("Get Record[key:%s] failed", keysForBenchmark[r])
+		_, err := zForBenchmark.Get(keysForBenchmark[r])
+        if err != nil {
+			t.Fatalf("Get Record[key:%s] failed", keysForBenchmark[r])
 		}
+        //assertEqualByteSlice(v, valuesForBenchmark[r], t)
 	}
 	end := time.Now()
 	d := end.Sub(begin)
-	b.Logf("%d get operation in %fs\n", operationsNumForBenchmark, d.Seconds())
-	b.Logf("average %f qps\n", float64(operationsNumForBenchmark)/d.Seconds())
-	b.Logf("average %f micros/op\n", d.Seconds()*1e6/float64(operationsNumForBenchmark))
+	log.Printf("%d get operation in %fs\n", operationsNumForBenchmark, d.Seconds())
+	log.Printf("average %f qps\n", float64(operationsNumForBenchmark)/d.Seconds())
+	log.Printf("average %f micros/op\n", d.Seconds()*1e6/float64(operationsNumForBenchmark))
 }
 
-func benchmarkRandomSetWhenMerge(b *testing.B) {
-	b.Log("RandomSetWhenMerge:")
+func benchmarkRandomSetWhenMerge(t *testing.T) {
 	done := make(chan bool, 1)
 	go func() {
 		zForBenchmark.Merge()
 		done <- true
 	}()
-	benchmarkRandomSet(b)
+	benchmarkRandomSet(t)
 	<-done
 }
 
-func benchmarkRandomGetWhenMerge(b *testing.B) {
-	b.Log("RandomGetWhenMerge:")
+func benchmarkRandomGetWhenMerge(t *testing.T) {
 	done := make(chan bool, 1)
 	go func() {
 		zForBenchmark.Merge()
 		done <- true
 	}()
-	benchmarkRandomGet(b)
+	benchmarkRandomGet(t)
 	<-done
 }
 
@@ -134,7 +133,7 @@ func initZCaskForBenchmark() {
         MaxDataFileId: 12345678901234567890,
         MaxKeySize: 10240,
         MaxValueSize: 10240,
-        MaxDataFileSize: 1024 * 1024 * 32,
+        MaxDataFileSize: 32<<20, //1024 * 1024 * 512,
         IsLoadOldDataFile: false,
     }
 
@@ -144,18 +143,31 @@ func initZCaskForBenchmark() {
     }
 }
 
-func BenchmarkAll(b *testing.B) {
+func TestBenchmarkAll(t *testing.T) {
+    if err := os.RemoveAll(dataFileDirectoryForBenchmark); err != nil {
+        t.Log(err)
+    }
+    if err := os.Mkdir(dataFileDirectoryForBenchmark, 0700); err != nil {
+        t.Log(err)
+    }
     initZCaskForBenchmark()
     if err := zForBenchmark.Start(); err != nil {
-        b.Fatal("zcask start failed.")
+        t.Fatal("zcask start failed.")
     }
     defer zForBenchmark.ShutDown()
 
-    benchmarkRandomSet(b)
-    b.Log("==================")
-    benchmarkRandomGet(b)
-    b.Log("==================")
-    benchmarkRandomSetWhenMerge(b)
-    b.Log("==================")
-    benchmarkRandomGetWhenMerge(b)
+	log.Println("RandomSet:")
+    benchmarkRandomSet(t)
+    log.Println("==================")
+
+	log.Println("RandomGet:")
+    benchmarkRandomGet(t)
+    log.Println("==================")
+
+	log.Println("RandomSetWhenMerge:")
+    benchmarkRandomSetWhenMerge(t)
+    log.Println("==================")
+
+	log.Println("RandomGetWhenMerge:")
+    benchmarkRandomGetWhenMerge(t)
 }
