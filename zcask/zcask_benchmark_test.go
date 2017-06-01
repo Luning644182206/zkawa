@@ -77,11 +77,11 @@ func benchmarkRandomGet(t *testing.T) {
     begin := time.Now()
     for i := 0; i < operationsNumForBenchmark; i++ {
         r := rand.Intn(len(keysForBenchmark))
-        _, err := zForBenchmark.Get(keysForBenchmark[r])
+        v, err := zForBenchmark.Get(keysForBenchmark[r])
         if err != nil {
             t.Fatalf("Get Record[key:%s] failed", keysForBenchmark[r])
         }
-        //assertEqualByteSlice(v, valuesForBenchmark[r], t)
+        assertEqualByteSlice(v, valuesForBenchmark[r], t)
     }
     end := time.Now()
     d := end.Sub(begin)

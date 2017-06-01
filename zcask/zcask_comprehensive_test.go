@@ -60,7 +60,7 @@ func TestZCaskComprehensive(t *testing.T) {
     var randomValues       [][]byte
     // init test data.
     testDataDirectory = "./test_data_for_TestZCaskComprehensive"
-    setTimes = 50000
+    setTimes = 100000
     randomKeys = make([]string, 0, setTimes)
     randomValues = make([][]byte, 0, setTimes)
 
