@@ -53,75 +53,75 @@ func init() {
 }
 
 func benchmarkRandomSet(t *testing.T) {
-	begin := time.Now()
-	j := 0
-	for i := 0; i < operationsNumForBenchmark; i++ {
-		if err := zForBenchmark.Set(keysForBenchmark[j], valuesForBenchmark[j], 0); err != nil {
-			log.Fatalf("Set Record[key:%s] failed, err=%s", keysForBenchmark[j], err)
-		}
-		j++
-		if j == len(keysForBenchmark) {
-			j = 0
-		}
-	}
-	end := time.Now()
-	d := end.Sub(begin)
-	log.Printf("%d set operation[key: %dB, value: %dB] in %fs\n", operationsNumForBenchmark, keySizeForBenchmark, valueSizeForBenchmark, d.Seconds())
-	log.Printf("average %f qps\n", float64(operationsNumForBenchmark)/d.Seconds())
-	writeMB := int64(operationsNumForBenchmark) * int64(valueSizeForBenchmark) / 1e6
-	log.Printf("average %f MB/s\n", float64(writeMB)/d.Seconds())
-	log.Printf("average %f micros/op\n", d.Seconds()*1e6/float64(operationsNumForBenchmark))
+    begin := time.Now()
+    j := 0
+    for i := 0; i < operationsNumForBenchmark; i++ {
+        if err := zForBenchmark.Set(keysForBenchmark[j], valuesForBenchmark[j], 0); err != nil {
+            log.Fatalf("Set Record[key:%s] failed, err=%s", keysForBenchmark[j], err)
+        }
+        j++
+        if j == len(keysForBenchmark) {
+            j = 0
+        }
+    }
+    end := time.Now()
+    d := end.Sub(begin)
+    log.Printf("%d set operation[key: %dB, value: %dB] in %fs\n", operationsNumForBenchmark, keySizeForBenchmark, valueSizeForBenchmark, d.Seconds())
+    log.Printf("average %f qps\n", float64(operationsNumForBenchmark)/d.Seconds())
+    writeMB := int64(operationsNumForBenchmark) * int64(valueSizeForBenchmark) / 1e6
+    log.Printf("average %f MB/s\n", float64(writeMB)/d.Seconds())
+    log.Printf("average %f micros/op\n", d.Seconds()*1e6/float64(operationsNumForBenchmark))
 }
 
 func benchmarkRandomGet(t *testing.T) {
-	begin := time.Now()
-	for i := 0; i < operationsNumForBenchmark; i++ {
-		r := rand.Intn(len(keysForBenchmark))
-		_, err := zForBenchmark.Get(keysForBenchmark[r])
+    begin := time.Now()
+    for i := 0; i < operationsNumForBenchmark; i++ {
+        r := rand.Intn(len(keysForBenchmark))
+        _, err := zForBenchmark.Get(keysForBenchmark[r])
         if err != nil {
-			t.Fatalf("Get Record[key:%s] failed", keysForBenchmark[r])
-		}
+            t.Fatalf("Get Record[key:%s] failed", keysForBenchmark[r])
+        }
         //assertEqualByteSlice(v, valuesForBenchmark[r], t)
-	}
-	end := time.Now()
-	d := end.Sub(begin)
-	log.Printf("%d get operation in %fs\n", operationsNumForBenchmark, d.Seconds())
-	log.Printf("average %f qps\n", float64(operationsNumForBenchmark)/d.Seconds())
-	log.Printf("average %f micros/op\n", d.Seconds()*1e6/float64(operationsNumForBenchmark))
+    }
+    end := time.Now()
+    d := end.Sub(begin)
+    log.Printf("%d get operation in %fs\n", operationsNumForBenchmark, d.Seconds())
+    log.Printf("average %f qps\n", float64(operationsNumForBenchmark)/d.Seconds())
+    log.Printf("average %f micros/op\n", d.Seconds()*1e6/float64(operationsNumForBenchmark))
 }
 
 func benchmarkRandomSetWhenMerge(t *testing.T) {
-	done := make(chan bool, 1)
-	go func() {
-		zForBenchmark.Merge()
-		done <- true
-	}()
-	benchmarkRandomSet(t)
-	<-done
+    done := make(chan bool, 1)
+    go func() {
+        zForBenchmark.Merge()
+        done <- true
+    }()
+    benchmarkRandomSet(t)
+    <-done
 }
 
 func benchmarkRandomGetWhenMerge(t *testing.T) {
-	done := make(chan bool, 1)
-	go func() {
-		zForBenchmark.Merge()
-		done <- true
-	}()
-	benchmarkRandomGet(t)
-	<-done
+    done := make(chan bool, 1)
+    go func() {
+        zForBenchmark.Merge()
+        done <- true
+    }()
+    benchmarkRandomGet(t)
+    <-done
 }
 
 func generateKeysForBenchmark(operationsNum, keySize int) {
-	keysForBenchmark = make([]string, operationsNum)
-	for i := 0; i < operationsNum; i++ {
-		keysForBenchmark[i] = randomString(keySize)
-	}
+    keysForBenchmark = make([]string, operationsNum)
+    for i := 0; i < operationsNum; i++ {
+        keysForBenchmark[i] = randomString(keySize)
+    }
 }
 
 func generateValuesForBenchmark(operationsNum, valueSize int) {
-	valuesForBenchmark = make([][]byte, operationsNum)
-	for i := 0; i < operationsNum; i++ {
-		valuesForBenchmark[i] = randomBytes(valueSize)
-	}
+    valuesForBenchmark = make([][]byte, operationsNum)
+    for i := 0; i < operationsNum; i++ {
+        valuesForBenchmark[i] = randomBytes(valueSize)
+    }
 }
 
 func initZCaskForBenchmark() {
@@ -156,18 +156,18 @@ func TestBenchmarkAll(t *testing.T) {
     }
     defer zForBenchmark.ShutDown()
 
-	log.Println("RandomSet:")
+    log.Println("RandomSet:")
     benchmarkRandomSet(t)
     log.Println("==================")
 
-	log.Println("RandomGet:")
+    log.Println("RandomGet:")
     benchmarkRandomGet(t)
     log.Println("==================")
 
-	log.Println("RandomSetWhenMerge:")
+    log.Println("RandomSetWhenMerge:")
     benchmarkRandomSetWhenMerge(t)
     log.Println("==================")
 
-	log.Println("RandomGetWhenMerge:")
+    log.Println("RandomGetWhenMerge:")
     benchmarkRandomGetWhenMerge(t)
 }
