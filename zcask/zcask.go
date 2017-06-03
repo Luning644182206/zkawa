@@ -47,6 +47,7 @@ type Option struct {
     MaxKeySize          uint32
     MaxValueSize        uint32
     MaxDataFileSize     int64
+    WriteBufferSize     uint32
     IsLoadOldDataFile   bool
 }
 
@@ -117,7 +118,8 @@ func (z *ZCask) Start() error {
         }
     }
 
-    af, err := NewActiveDataFile(z.option.DataFileDirectory)
+    af, err := NewActiveDataFile(z.option.DataFileDirectory,
+        z.option.WriteBufferSize)
     if err != nil {
         log.Printf("new active data file failed, details: %v", err)
         return err
@@ -129,8 +131,6 @@ func (z *ZCask) Start() error {
 }
 
 func (z *ZCask) ShutDown() error {
-    z.wgHinting.Wait()
-
     z.rwMutex.Lock()
     defer z.rwMutex.Unlock()
 
@@ -138,6 +138,10 @@ func (z *ZCask) ShutDown() error {
         log.Printf("freeze active data file failed, details: %v", err)
         return err
     }
+
+    // freeze active data file will make the last hint file.
+    // call wg.Wait after freeze.
+    z.wgHinting.Wait()
 
     if err := z.fileCache.Release(); err != nil {
         log.Printf("release file cache failed, details: %v", err)
@@ -258,7 +262,7 @@ func (z *ZCask) Get(key string) ([]byte, error) {
 
     record, err := dataFile.ReadZRecordAt(tv.ZRecordPos)
     if err != nil {
-        log.Fatalf("read zrecord at old data file '%s' failed, details: %v", dataFilePath, err)
+        log.Fatalf("read zrecord at data file '%s' failed, details: %v", dataFilePath, err)
         return nil, err
     }
 
@@ -402,14 +406,11 @@ func (z *ZCask) loadFromHintFile(fileId uint64, filePath string) error {
     timestamp := getCurrentUnixNano()
 
     var err error
-    var zhf ZHintFile
 
-    hf, err := NewHintFile(fileId, filePath, HintFileReadOnlyMode)
+    rhf, err := NewReadableHintFile(fileId, filePath)
     if err != nil {
         return err
     }
-    zhf = hf
-    defer zhf.Close()
 
     dataFilePath := z.getDataFilePathById(fileId)
     odf, err := z.getOldDataFile(dataFilePath)
@@ -417,10 +418,10 @@ func (z *ZCask) loadFromHintFile(fileId uint64, filePath string) error {
         return err
     }
 
-    fileSize := zhf.Size()
+    fileSize := rhf.Size()
     var zhr *ZHintRecord
     for  offset := int64(0); offset < fileSize; offset += int64(zhr.Size()) {
-        zhr, err = zhf.ReadZHintRecordAt(offset)
+        zhr, err = rhf.ReadZHintRecordAt(offset)
         if err != nil {
             return err
         }
@@ -521,14 +522,17 @@ func (z *ZCask) setZRecord(key string, value []byte, timestamp, expiration uint6
 func (z *ZCask) freezeActiveDataFile() error {
     // get file id for hinting
     fileId := z.activeDataFile.FileId()
+    hintFilePath := z.getHintFilePathById(fileId)
+
     // close active data file
     if err := z.activeDataFile.Close(); err != nil {
         return nil
     }
+
     // make hint file
-    if err := z.makeHintFile(z.activeTable, fileId); err != nil {
-        return err
-    }
+    z.wgHinting.Add(1)
+    go z.makeHintFile(z.activeTable, fileId, hintFilePath)
+
     // don't release active table, it was used by hinting.
     z.activeTable = nil
 
@@ -537,7 +541,7 @@ func (z *ZCask) freezeActiveDataFile() error {
 
 func (z *ZCask) renewActiveDataFile() error {
     // renew a active data file
-    newaf, err := NewActiveDataFile(z.option.DataFileDirectory)
+    newaf, err := NewActiveDataFile(z.option.DataFileDirectory, z.option.WriteBufferSize)
     if err != nil {
         return err
     }
@@ -553,31 +557,27 @@ func (z *ZCask) renewActiveDataFile() error {
     return nil
 }
 
-func (z *ZCask) makeHintFile(activeTable *HashTable, fileId uint64) error {
-    z.wgHinting.Add(1)
+func (z *ZCask) makeHintFile(activeTable *HashTable, fileId uint64, filePath string) error {
     defer z.wgHinting.Done()
     defer activeTable.Release()
 
-    filePath := z.getHintFilePathById(fileId)
-
-    hf, err := NewHintFile(fileId, filePath, HintFileAppendMode)
+    wbs := z.option.WriteBufferSize
+    whf, err := NewWritableHintFile(fileId, filePath, wbs)
     if err != nil {
         return err
     }
 
-    var zhf ZHintFile = hf
-    defer zhf.Close()
     keys := activeTable.Keys()
     for _, key := range keys {
         tv, err := activeTable.GetIncludeExpired(key)
         if err != nil {
             return err
         }
-        if err := zhf.WriteZHintRecord([]byte(key), tv); err != nil {
+        if err := whf.WriteZHintRecord([]byte(key), tv); err != nil {
             return err
         }
     }
-    if err := zhf.Close(); err != nil {
+    if err := whf.Close(); err != nil {
         return err
     }
 

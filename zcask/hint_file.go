@@ -10,21 +10,11 @@ import (
     "encoding/binary"
     "errors"
     "fmt"
-    "log"
     "os"
 )
 
 const (
     ZHintFileSuffix                     = ".zhint"
-
-    HintFileReadOnlyMode                = "readonly"
-    HintFileAppendMode                  = "append"
-
-    HintFileReadOnlyFlag                = os.O_RDONLY
-    HintFileAppendFlag                  = os.O_CREATE|os.O_RDWR|os.O_APPEND
-
-    HintFileReadOnlyPerm                = 0444
-    HintFileAppendFlagPerm              = 0644
 
     ZHintRecordHeaderSize               = 37
 
@@ -67,76 +57,95 @@ type ZHintRecord struct {
     Key         []byte
 }
 
-type ZHintFile interface {
-    Path() string
-    FileId() uint64
-    Size()  int64
-    ReadZHintRecordAt(offset int64) (*ZHintRecord, error)
-    WriteZHintRecord(key []byte, tv *TableValue) error
-    Close() error
-}
-
-type HintFile struct {
+type ReadableHintFile struct {
     f           *os.File
     fileId      uint64
     path        string
     size        int64
 }
 
-func NewHintFile(fileId uint64, filePath string, mode string) (*HintFile, error) {
+type WritableHintFile struct {
+    f           *FileWithBuffer
+    fileId      uint64
+    path        string
+}
+
+func NewReadableHintFile(fileId uint64, filePath string) (*ReadableHintFile, error) {
     var f *os.File
     var err error
     var size int64
 
-    if mode == HintFileReadOnlyMode {
-        f, err = os.OpenFile(filePath, HintFileReadOnlyFlag, HintFileReadOnlyPerm)
-    } else if mode == HintFileAppendMode {
-        f, err = os.OpenFile(filePath, HintFileAppendFlag, HintFileAppendFlagPerm)
-    } else {
-        log.Fatal("new hint file with a unknowed mode: %s", mode)
-    }
-
+    f, err = os.OpenFile(filePath, os.O_RDONLY, 0444)
     if err != nil {
         return nil, err
     }
 
-    if mode == HintFileReadOnlyMode {
-        size, err = getFileSize(f)
-        if err != nil {
-            return nil, err
-        }
-    } else {
-        size = 0
+    size, err = getFileSize(f)
+    if err != nil {
+        return nil, err
     }
 
-    return &HintFile {
-        f: f,
+    return &ReadableHintFile {
+        f:      f,
         fileId: fileId,
-        path: filePath,
-        size: size,
+        path:   filePath,
+        size:   size,
     }, nil
 }
 
-func (hf *HintFile) Size() int64 {
-    return hf.size
-}
+func NewWritableHintFile(fileId uint64, filePath string, writeBufferSize uint32) (*WritableHintFile, error) {
+    var f *os.File
+    var err error
 
-func (hf *HintFile) Path() string {
-    return hf.path
-}
-
-func (hf *HintFile) FileId() uint64 {
-    return hf.fileId
-}
-
-func (hf *HintFile) ReadZHintRecordAt(offset int64) (*ZHintRecord, error) {
-    if offset > hf.size {
-        return nil, errors.New(
-            fmt.Sprintf("offset exceed the size of hint file '%s'", hf.path))
+    f, err = os.OpenFile(filePath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
+    if err != nil {
+        return nil, err
     }
 
-    hbytes := make([]byte, ZHintRecordHeaderSize, ZHintRecordHeaderSize)
-    _, err := hf.f.ReadAt(hbytes, offset)
+    fwb, err := NewFileWithBuffer(f, writeBufferSize)
+    if err != nil {
+        return nil, err
+    }
+
+    return &WritableHintFile{
+        f:          fwb,
+        fileId:     fileId,
+        path:       filePath,
+    }, nil
+}
+
+func (rhf *ReadableHintFile) Size() int64 {
+    return rhf.size
+}
+
+func (whf *WritableHintFile) Size() int64 {
+    return whf.f.Size()
+}
+
+func (rhf *ReadableHintFile) Path() string {
+    return rhf.path
+}
+
+func (whf *WritableHintFile) Path() string {
+    return whf.path
+}
+
+func (rhf *ReadableHintFile) FileId() uint64 {
+    return rhf.fileId
+}
+
+func (whf *WritableHintFile) FileId() uint64 {
+    return whf.fileId
+}
+
+func (rhf *ReadableHintFile) ReadZHintRecordAt(offset int64) (*ZHintRecord, error) {
+    if offset > rhf.size {
+        return nil, errors.New(
+            fmt.Sprintf("offset exceed the size of hint file '%s'", rhf.path))
+    }
+
+    hbytes := make([]byte, ZHintRecordHeaderSize)
+    _, err := rhf.f.ReadAt(hbytes, offset)
     if err != nil {
         return nil, err
     }
@@ -146,8 +155,8 @@ func (hf *HintFile) ReadZHintRecordAt(offset int64) (*ZHintRecord, error) {
         return nil, err
     }
 
-    kbytes := make([]byte, header.KeySize, header.KeySize)
-    _, err = hf.f.ReadAt(kbytes, offset + ZRecordHeaderSize)
+    kbytes := make([]byte, header.KeySize)
+    _, err = rhf.f.ReadAt(kbytes, offset + ZRecordHeaderSize)
     if err != nil {
         return nil, err
     }
@@ -159,29 +168,35 @@ func (hf *HintFile) ReadZHintRecordAt(offset int64) (*ZHintRecord, error) {
 
 }
 
-func (hf *HintFile) WriteZHintRecord(key []byte, tv *TableValue) error {
+func (whf *WritableHintFile) WriteZHintRecord(key []byte, tv *TableValue) error {
     header, err := encodeZHintRecordHeader(key, tv)
     if err != nil {
         return err
     }
 
-    writedBytes, err := hf.f.Write(header)
+    writedBytes, err := whf.f.Write(header)
     if err != nil || writedBytes != ZHintRecordHeaderSize {
         return err
     }
 
-    writedBytes, err = hf.f.Write(key)
+    writedBytes, err = whf.f.Write(key)
     if err != nil || writedBytes != len(key) {
         return err
     }
 
-    hf.size += int64(ZHintRecordHeaderSize + len(key))
+    return nil
+}
+
+func (rhf *ReadableHintFile) Close() error {
+    if err := rhf.f.Close(); err != nil {
+        return err
+    }
 
     return nil
 }
 
-func (hf *HintFile) Close() error {
-    if err := hf.f.Close(); err != nil {
+func (whf *WritableHintFile) Close() error {
+    if err := whf.f.Close(); err != nil {
         return err
     }
 

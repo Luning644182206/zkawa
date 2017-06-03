@@ -72,10 +72,9 @@ type ZDataFile interface {
 }
 
 type ActiveDataFile struct {
-    f           *os.File
+    f           *FileWithBuffer
     fileId      uint64
     path        string
-    size        int64
 
     // TODO(Zheng Gonglin): write buffer
 }
@@ -92,7 +91,7 @@ type OldDataFileCache struct {
     cache       map[string]*OldDataFile     // path -> *OldDataFile
 }
 
-func NewActiveDataFile(dataFileDirectory string) (*ActiveDataFile, error) {
+func NewActiveDataFile(dataFileDirectory string, writeBufferSize uint32) (*ActiveDataFile, error) {
     unixNano := getCurrentUnixNano()
     baseFileName := fmt.Sprintf("%d%s", unixNano, ZDataFileSuffix)
     filePath := path.Join(dataFileDirectory, baseFileName)
@@ -102,11 +101,15 @@ func NewActiveDataFile(dataFileDirectory string) (*ActiveDataFile, error) {
         return nil, err
     }
 
+    fwb, err := NewFileWithBuffer(f, writeBufferSize)
+    if err != nil {
+        return nil, err
+    }
+
     return &ActiveDataFile {
-        f: f,
+        f:      fwb,
         fileId: unixNano,
-        path: filePath,
-        size: 0,
+        path:   filePath,
     }, nil
 }
 
@@ -143,7 +146,7 @@ func NewOldDataFileCache() (*OldDataFileCache, error) {
 }
 
 func (adf *ActiveDataFile) Size() int64 {
-    return adf.size
+    return adf.f.Size()
 }
 
 func (adf *ActiveDataFile) Path() string {
@@ -163,7 +166,7 @@ func (adf *ActiveDataFile) WriteZRecord(key []byte, value []byte, timestamp, exp
         return 0, err
     }
 
-    offset := adf.size
+    offset := adf.f.Size()
 
     writedBytes, err := adf.f.Write(header)
     if err != nil || writedBytes != ZRecordHeaderSize {
@@ -180,18 +183,14 @@ func (adf *ActiveDataFile) WriteZRecord(key []byte, value []byte, timestamp, exp
         return -1, err
     }
 
-    adf.size += int64(ZRecordHeaderSize + keySize + valueSize)
-
     return offset, nil
 }
 
 func (adf *ActiveDataFile) ReadZRecordAt(offset int64) (*ZRecord, error) {
-    if offset > adf.size {
+    if offset >= adf.f.Size() {
         errMes := "offset exceed the size of active data file."
         return nil, errors.New(errMes)
     }
-
-    // TODO(Zheng Gonglin): read from active file write buffer
 
     return readZRecordAt(adf.f, offset)
 }
@@ -216,7 +215,7 @@ func (odf *OldDataFile) FileId() uint64 {
 }
 
 func (odf *OldDataFile) ReadZRecordAt(offset int64) (*ZRecord, error) {
-    if offset > odf.size {
+    if offset >= odf.size {
         return nil, errors.New(
             fmt.Sprintf("offset exceed the size of old data file[%s]", odf.path))
     }
@@ -324,8 +323,8 @@ func decodeZRecordHeader(buffer []byte) (*ZRecordHeader, error) {
     }, nil
 }
 
-func readZRecordAt(dataFile *os.File, offset int64) (*ZRecord, error) {
-    hbytes := make([]byte, ZRecordHeaderSize, ZRecordHeaderSize)
+func readZRecordAt(dataFile ZCaskFile, offset int64) (*ZRecord, error) {
+    hbytes := make([]byte, ZRecordHeaderSize)
     _, err := dataFile.ReadAt(hbytes, offset)
     if err != nil {
         return nil, err
@@ -336,13 +335,13 @@ func readZRecordAt(dataFile *os.File, offset int64) (*ZRecord, error) {
         return nil, err
     }
 
-    kbytes := make([]byte, header.KeySize, header.KeySize)
+    kbytes := make([]byte, header.KeySize)
     _, err = dataFile.ReadAt(kbytes, offset + ZRecordHeaderSize)
     if err != nil {
         return nil, err
     }
 
-    vbytes := make([]byte, header.ValueSize, header.ValueSize)
+    vbytes := make([]byte, header.ValueSize)
     _, err = dataFile.ReadAt(vbytes, offset + int64(ZRecordHeaderSize) + int64(header.KeySize))
     if err != nil {
         return nil, err

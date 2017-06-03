@@ -53,6 +53,98 @@ func assertEqualByteSlice(xbs, ybs []byte, t *testing.T) {
     }
 }
 
+func TestRandomSetAndGetAndDelete(t *testing.T) {
+    operatesNum := 100000
+    testDataDirectory := "./test_data_for_TestRandomSetAndGetAndDelete"
+
+    if err := os.RemoveAll(testDataDirectory); err != nil {
+        // TODO(Zheng Gonglin): LOG FATAL
+        t.Log(err)
+    }
+    if err := os.Mkdir(testDataDirectory, 0700); err != nil {
+        // TODO(Zheng Gonglin): LOG FATAL
+        t.Log(err)
+    }
+
+    // zcask configuration
+    opt := Option {
+        DataFileDirectory: testDataDirectory,
+        MinDataFileId: 0,
+        MaxDataFileId: 12345678901234567890,
+        MaxKeySize: 1024,
+        MaxValueSize: 10240,
+        MaxDataFileSize: 32 << 20,
+        WriteBufferSize: 4 << 20,
+        IsLoadOldDataFile: false,
+    }
+
+    z, err := NewZCask(opt)
+    err = z.Start()
+    if err != nil {
+        t.Fatalf("zcask start failed, details: %v", err)
+    }
+
+    dict := make(map[string][]byte)
+    var keys []string
+    var values [][]byte
+    for i := 0; i < operatesNum; i++ {
+        op := rand.Intn(3)
+        if op == 0 {
+            // Set
+            ksize := rand.Intn(22) + 10
+            vsize := rand.Intn(2048) + 10
+            key := randomString(ksize)
+            value := randomBytes(vsize)
+
+            dict[key] = value
+
+            err := z.Set(key, value, 0)
+            if err != nil {
+                t.Fatalf("zcask set <%s, %s> failed, details: %v",
+                    key, string(value), err)
+            }
+
+            keys = append(keys, key)
+            values = append(values, value)
+        } else if op == 1 {
+            // Get
+            if len(keys) == 0 {
+                continue
+            }
+
+            idx := rand.Intn(len(keys))
+            key := keys[idx]
+
+            dv, ok := dict[key]
+            zv, err := z.Get(key)
+
+            if !ok {
+                if err == errorKeyNotExisted {
+                    continue
+                } else {
+                    t.Fatalf("key %s was not existed, but get from zcask, details: %v", key, err)
+                }
+            } else {
+                if err != nil {
+                    t.Fatalf("seted key %s, but can't get from zcask, details: %v", key, err)
+                } else {
+                    assertEqualByteSlice(dv, zv, t)
+                }
+            }
+        } else {
+            // Delete
+            if len(keys) == 0 {
+                continue
+            }
+
+            idx := rand.Intn(len(keys))
+            key := keys[idx]
+            delete(dict, key)
+            z.Delete(key)
+        }
+    }
+}
+
 func TestZCaskComprehensive(t *testing.T) {
     var testDataDirectory  string
     var setTimes           int
@@ -74,8 +166,10 @@ func TestZCaskComprehensive(t *testing.T) {
     }
 
     for i := 0; i < setTimes; i++ {
-        randomKeys = append(randomKeys, randomString(32))
-        randomValues = append(randomValues, randomBytes(64))
+        ksize := rand.Intn(22) + 10
+        vsize := rand.Intn(54) + 10
+        randomKeys = append(randomKeys, randomString(ksize))
+        randomValues = append(randomValues, randomBytes(vsize))
     }
 
     // zcask configuration
@@ -85,7 +179,8 @@ func TestZCaskComprehensive(t *testing.T) {
         MaxDataFileId: 12345678901234567890,
         MaxKeySize: 1024,
         MaxValueSize: 1024,
-        MaxDataFileSize: 1024 * 1024 * 32,
+        MaxDataFileSize: 32 << 20,
+        WriteBufferSize: 4 << 20,
         IsLoadOldDataFile: false,
     }
 
@@ -98,7 +193,6 @@ func TestZCaskComprehensive(t *testing.T) {
     dict := make(map[string][]byte, setTimes)
 
     // testing zcask.Set
-    t.Logf("setTimes: %d\n", setTimes)
     for i := 0; i < setTimes; i++ {
         dict[randomKeys[i]] = randomValues[i]
         err := z.Set(randomKeys[i],
@@ -164,6 +258,7 @@ func TestZCaskComprehensive(t *testing.T) {
         assertEqualByteSlice(v, dict[key], t)
     }
 
+    // testing ShutDown
     if err = z.ShutDown(); err != nil {
         t.Fatal("zcask shutdown failed, details: %p", err)
     }

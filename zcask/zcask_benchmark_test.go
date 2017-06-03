@@ -48,7 +48,7 @@ func init() {
         operationsNumForBenchmark,
         valueSizeForBenchmark)
 
-    dataFileDirectoryForBenchmark = "test_data_for_benchmark"
+    dataFileDirectoryForBenchmark = "test_data_for_TestBenchmarkAll"
 
 }
 
@@ -77,11 +77,11 @@ func benchmarkRandomGet(t *testing.T) {
     begin := time.Now()
     for i := 0; i < operationsNumForBenchmark; i++ {
         r := rand.Intn(len(keysForBenchmark))
-        v, err := zForBenchmark.Get(keysForBenchmark[r])
+        _, err := zForBenchmark.Get(keysForBenchmark[r])
         if err != nil {
             t.Fatalf("Get Record[key:%s] failed", keysForBenchmark[r])
         }
-        assertEqualByteSlice(v, valuesForBenchmark[r], t)
+        //assertEqualByteSlice(v, valuesForBenchmark[r], t)
     }
     end := time.Now()
     d := end.Sub(begin)
@@ -129,12 +129,13 @@ func initZCaskForBenchmark() {
     var err error
     opt := Option {
         DataFileDirectory: dataFileDirectoryForBenchmark,
-        MinDataFileId: 0,
-        MaxDataFileId: 12345678901234567890,
-        MaxKeySize: 10240,
-        MaxValueSize: 10240,
-        MaxDataFileSize: 32<<20, //1024 * 1024 * 512,
-        IsLoadOldDataFile: false,
+        MinDataFileId:      0,
+        MaxDataFileId:      12345678901234567890,
+        MaxKeySize:         10240,
+        MaxValueSize:       10240,
+        MaxDataFileSize:    1024*1024*32,
+        WriteBufferSize:    1024*1024*4,
+        IsLoadOldDataFile:  false,
     }
 
     zForBenchmark, err = NewZCask(opt)
@@ -154,7 +155,6 @@ func TestBenchmarkAll(t *testing.T) {
     if err := zForBenchmark.Start(); err != nil {
         t.Fatal("zcask start failed.")
     }
-    defer zForBenchmark.ShutDown()
 
     log.Println("RandomSet:")
     benchmarkRandomSet(t)
@@ -164,10 +164,15 @@ func TestBenchmarkAll(t *testing.T) {
     benchmarkRandomGet(t)
     log.Println("==================")
 
+    log.Println("RandomGetWhenMerge:")
+    benchmarkRandomGetWhenMerge(t)
+    log.Println("==================")
+
     log.Println("RandomSetWhenMerge:")
     benchmarkRandomSetWhenMerge(t)
     log.Println("==================")
 
-    log.Println("RandomGetWhenMerge:")
-    benchmarkRandomGetWhenMerge(t)
+    if err := zForBenchmark.ShutDown(); err != nil {
+        t.Fatal("zcask shutdown failed, details: %p", err)
+    }
 }
