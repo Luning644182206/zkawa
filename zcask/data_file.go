@@ -16,6 +16,7 @@ import (
     "path/filepath"
     "strconv"
     "strings"
+    "syscall"
 )
 
 const (
@@ -69,6 +70,7 @@ type ZDataFile interface {
     Close() error
 
     ReadZRecordAt(offset int64) (*ZRecord, error)
+    ReadRawBytesAt(data []byte, offset int64) (int, error)
 }
 
 type ActiveDataFile struct {
@@ -79,16 +81,21 @@ type ActiveDataFile struct {
     // TODO(Zheng Gonglin): write buffer
 }
 
+type readRawBytesCallback func(*OldDataFile, []byte, int64) (int, error)
+
 type OldDataFile struct {
     f           *os.File
+    // base infomation
     fileId      uint64
     path        string
     size        int64
-}
-
-// OldDataFileCache is a simple map struct
-type OldDataFileCache struct {
-    cache       map[string]*OldDataFile     // path -> *OldDataFile
+    // data cache
+    isCached    bool
+    data        []byte
+    refCount    uint32
+    isInCache   bool
+    // how to read data
+    callback    readRawBytesCallback
 }
 
 func NewActiveDataFile(dataFileDirectory string, writeBufferSize uint32) (*ActiveDataFile, error) {
@@ -113,7 +120,7 @@ func NewActiveDataFile(dataFileDirectory string, writeBufferSize uint32) (*Activ
     }, nil
 }
 
-func NewOldDataFile(path string) (*OldDataFile, error) {
+func NewOldDataFile(path string, isCached bool) (*OldDataFile, error) {
     f, err := os.OpenFile(path, os.O_RDONLY, 0444)
     if err != nil {
         return nil, err
@@ -131,17 +138,39 @@ func NewOldDataFile(path string) (*OldDataFile, error) {
         return nil, err
     }
 
-    return &OldDataFile {
-        f: f,
-        fileId: fileId,
-        path: path,
-        size: size,
-    }, nil
-}
+    var data []byte
+    var cb readRawBytesCallback
+    if isCached {
+        stat, err := f.Stat()
+        if err != nil {
+            return nil, err
+        }
 
-func NewOldDataFileCache() (*OldDataFileCache, error) {
-    return &OldDataFileCache {
-        cache: make(map[string]*OldDataFile, 64),
+        if stat.Size() > 0 {
+            data, err = syscall.Mmap(int(f.Fd()), 0, int(stat.Size()), syscall.PROT_READ, syscall.MAP_PRIVATE)
+            if err != nil {
+                return nil, err
+            }
+        }
+        cb = readOldDataFileFromMemory
+    } else {
+        // log.Printf("open old data file '%s' without mmap\n", path)
+        cb = readOldDataFileFromDisk
+    }
+
+    return &OldDataFile {
+        f:          f,
+        // base infomation
+        fileId:     fileId,
+        path:       path,
+        size:       size,
+        // data cache
+        isCached:   isCached,
+        data:       data,
+        refCount:   1,          // is one but not zero.
+        isInCache:  false,
+        // how to get data
+        callback:   cb,
     }, nil
 }
 
@@ -192,7 +221,11 @@ func (adf *ActiveDataFile) ReadZRecordAt(offset int64) (*ZRecord, error) {
         return nil, errors.New(errMes)
     }
 
-    return readZRecordAt(adf.f, offset)
+    return readZRecordAt(adf, offset)
+}
+
+func (adf *ActiveDataFile) ReadRawBytesAt(data []byte, offset int64) (int, error) {
+    return adf.f.ReadAt(data, offset)
 }
 
 func (adf *ActiveDataFile) Close() error {
@@ -216,49 +249,26 @@ func (odf *OldDataFile) FileId() uint64 {
 
 func (odf *OldDataFile) ReadZRecordAt(offset int64) (*ZRecord, error) {
     if offset >= odf.size {
-        return nil, errors.New(
-            fmt.Sprintf("offset exceed the size of old data file[%s]", odf.path))
+        errMsg := fmt.Sprintf("offset exceed the size of old data file[%s]", odf.path)
+        return nil, errors.New(errMsg)
     }
 
-    return readZRecordAt(odf.f, offset)
+    return readZRecordAt(odf, offset)
 }
 
 func (odf *OldDataFile) Close() (error) {
-    return odf.f.Close()
-}
-
-func (c *OldDataFileCache) Get(path string) (*OldDataFile, error) {
-    oldf, ok := c.cache[path]
-    if !ok {
-        oldf, err := NewOldDataFile(path)
-        if err != nil {
-            return nil, err
+    odf.refCount--
+    if odf.refCount == 0 && !odf.isInCache {
+        // log.Printf("close old data file '%s' by LRU cache eliminate\n", odf.path)
+        if err := odf.f.Close(); err != nil {
+            return err
         }
-        c.cache[path] = oldf
-        return oldf, nil
     }
-    return oldf, nil
-}
-
-func (c *OldDataFileCache) Delete(path string) error {
-    oldf, ok := c.cache[path]
-    if !ok {
-        return nil
-    }
-    err := oldf.Close()
-    if err != nil {
-        return err
-    }
-    delete(c.cache, path)
     return nil
 }
 
-func (c *OldDataFileCache) Release() error {
-    for _, f := range c.cache {
-        f.Close()
-    }
-    c.cache = nil
-    return nil
+func (odf *OldDataFile) ReadRawBytesAt(data []byte, offset int64) (int, error) {
+    return odf.callback(odf, data, offset)
 }
 
 func (zr *ZRecord) Size() uint32 {
@@ -323,9 +333,23 @@ func decodeZRecordHeader(buffer []byte) (*ZRecordHeader, error) {
     }, nil
 }
 
-func readZRecordAt(dataFile ZCaskFile, offset int64) (*ZRecord, error) {
+func readOldDataFileFromMemory(odf *OldDataFile, data []byte, offset int64) (int, error) {
+    outOfSizeError := errors.New("out of old data file cache size.")
+    end := offset + int64(len(data))
+    if end > odf.size {
+        return -1, outOfSizeError
+    }
+    copy(data, odf.data[offset:end])
+    return len(data), nil
+}
+
+func readOldDataFileFromDisk(odf *OldDataFile, data []byte, offset int64) (int, error) {
+    return odf.f.ReadAt(data, offset)
+}
+
+func readZRecordAt(dataFile ZDataFile, offset int64) (*ZRecord, error) {
     hbytes := make([]byte, ZRecordHeaderSize)
-    _, err := dataFile.ReadAt(hbytes, offset)
+    _, err := dataFile.ReadRawBytesAt(hbytes, offset)
     if err != nil {
         return nil, err
     }
@@ -336,13 +360,13 @@ func readZRecordAt(dataFile ZCaskFile, offset int64) (*ZRecord, error) {
     }
 
     kbytes := make([]byte, header.KeySize)
-    _, err = dataFile.ReadAt(kbytes, offset + ZRecordHeaderSize)
+    _, err = dataFile.ReadRawBytesAt(kbytes, offset + int64(ZRecordHeaderSize))
     if err != nil {
         return nil, err
     }
 
     vbytes := make([]byte, header.ValueSize)
-    _, err = dataFile.ReadAt(vbytes, offset + int64(ZRecordHeaderSize) + int64(header.KeySize))
+    _, err = dataFile.ReadRawBytesAt(vbytes, offset + int64(ZRecordHeaderSize) + int64(header.KeySize))
     if err != nil {
         return nil, err
     }

@@ -49,6 +49,8 @@ type Option struct {
     MaxDataFileSize     int64
     WriteBufferSize     uint32
     IsLoadOldDataFile   bool
+    MaxOpenOldDataFile  uint32
+    MaxCacheOldDataFile uint32
 }
 
 type ZCask struct {
@@ -79,7 +81,7 @@ func NewZCask(opt Option) (*ZCask, error) {
         return nil, err
     }
 
-    fc, err := NewOldDataFileCache()
+    fc, err := NewOldDataFileCache(opt.MaxCacheOldDataFile, opt.MaxCacheOldDataFile)
     if err != nil {
         return nil, err
     }
@@ -255,6 +257,7 @@ func (z *ZCask) Get(key string) ([]byte, error) {
         if err != nil {
             log.Fatalf("get old data file '%s' failed, details: %v", dataFilePath, err)
         }
+        defer oldf.Close()
         dataFile = oldf
     } else {
         dataFile = z.activeDataFile
@@ -309,6 +312,7 @@ func (z *ZCask) mergeFromDataFile(fid uint64) error {
     if err != nil {
         return err
     }
+    defer odf.Close()
 
     size := odf.Size()
     var zr *ZRecord
@@ -417,6 +421,7 @@ func (z *ZCask) loadFromHintFile(fileId uint64, filePath string) error {
     if err != nil {
         return err
     }
+    defer odf.Close()
 
     fileSize := rhf.Size()
     var zhr *ZHintRecord
@@ -440,10 +445,11 @@ func (z *ZCask) loadFromDataFile(fileId uint64, filePath string) error {
     timestamp := getCurrentUnixNano()
 
     var err error
-    odf, err := NewOldDataFile(filePath)
+    odf, err := z.getOldDataFile(filePath)
     if err != nil {
         return err
     }
+    defer odf.Close()
 
     fileSize := odf.Size()
     var zr *ZRecord
@@ -456,8 +462,6 @@ func (z *ZCask) loadFromDataFile(fileId uint64, filePath string) error {
 
     return nil
 }
-
-
 
 func (z *ZCask) setZRecord(key string, value []byte, timestamp, expiration uint64, isDelete bool) error {
     keySize := uint32(len(key))

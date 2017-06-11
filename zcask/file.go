@@ -14,13 +14,6 @@ import (
     "os"
 )
 
-type ZCaskFile interface {
-    // os.File api style
-    // Write([]byte) (int, error)
-    ReadAt([]byte, int64) (int, error)
-    Close() error
-}
-
 type FileWithBuffer struct {
     f               *os.File
     buffer          []byte
