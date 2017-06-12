@@ -41,16 +41,16 @@ func init() {
 }
 
 type Option struct {
-    DataFileDirectory   string
-    MinDataFileId       uint64              // id is unix nano
-    MaxDataFileId       uint64
-    MaxKeySize          uint32
-    MaxValueSize        uint32
-    MaxDataFileSize     int64
-    WriteBufferSize     uint32
-    IsLoadOldDataFile   bool
-    MaxOpenOldDataFile  uint32
-    MaxCacheOldDataFile uint32
+    dataFileDirectory   string
+    minDataFileId       uint64              // id is unix nano
+    maxDataFileId       uint64
+    maxKeySize          uint32
+    maxValueSize        uint32
+    maxDataFileSize     int64
+    writeBufferSize     uint32
+    isLoadOldDataFile   bool
+    maxOpenOldDataFile  uint32
+    maxCacheOldDataFile uint32
 }
 
 type ZCask struct {
@@ -66,8 +66,8 @@ type ZCask struct {
 }
 
 func NewZCask(opt Option) (*ZCask, error) {
-    if !isDir(opt.DataFileDirectory) {
-        errMsg := fmt.Sprintf("'%s' is not a directory", opt.DataFileDirectory)
+    if !isDir(opt.dataFileDirectory) {
+        errMsg := fmt.Sprintf("'%s' is not a directory", opt.dataFileDirectory)
         return nil, errors.New(errMsg)
     }
 
@@ -81,7 +81,7 @@ func NewZCask(opt Option) (*ZCask, error) {
         return nil, err
     }
 
-    fc, err := NewOldDataFileCache(opt.MaxCacheOldDataFile, opt.MaxCacheOldDataFile)
+    fc, err := NewOldDataFileCache(opt.maxCacheOldDataFile, opt.maxCacheOldDataFile)
     if err != nil {
         return nil, err
     }
@@ -112,7 +112,7 @@ func (z *ZCask) Start() error {
         return errorZCaskStopped
     }
 
-    if z.option.IsLoadOldDataFile {
+    if z.option.isLoadOldDataFile {
         err := z.Load()
         if err != nil {
             log.Printf("load data file failed, details: %v", err)
@@ -120,8 +120,8 @@ func (z *ZCask) Start() error {
         }
     }
 
-    af, err := NewActiveDataFile(z.option.DataFileDirectory,
-        z.option.WriteBufferSize)
+    af, err := NewActiveDataFile(z.option.dataFileDirectory,
+        z.option.writeBufferSize)
     if err != nil {
         log.Printf("new active data file failed, details: %v", err)
         return err
@@ -166,13 +166,13 @@ func (z *ZCask) ShutDown() error {
 }
 
 func (z *ZCask) Load() error {
-    fis, err := ioutil.ReadDir(z.option.DataFileDirectory)
+    fis, err := ioutil.ReadDir(z.option.dataFileDirectory)
     if err != nil {
         log.Fatalf("list data file directory failed, details: %v", err)
     }
     fileIds := make([]uint64, 0, 128)
     for _, fi := range fis {
-        fpath := path.Join(z.option.DataFileDirectory, fi.Name())
+        fpath := path.Join(z.option.dataFileDirectory, fi.Name())
         if !z.isDataFilePath(fpath) {
             continue
         }
@@ -203,14 +203,14 @@ func (z *ZCask) Merge() error {
 	defer atomic.CompareAndSwapInt32(&z.isMerging, 1, 0)
 
     z.rwMutex.Lock()
-    fis, err := ioutil.ReadDir(z.option.DataFileDirectory)
+    fis, err := ioutil.ReadDir(z.option.dataFileDirectory)
     if err != nil {
         z.rwMutex.Unlock()
         log.Fatalf("list data file directory, details: %v", err)
     }
     fileIds := make([]uint64, 0, 128)
     for _, fi := range fis {
-        fpath := path.Join(z.option.DataFileDirectory, fi.Name())
+        fpath := path.Join(z.option.dataFileDirectory, fi.Name())
         if !z.isOldDataFilePath(fpath) {
             continue
         }
@@ -244,7 +244,7 @@ func (z *ZCask) Get(key string) ([]byte, error) {
         return nil, err
     }
 
-    dataFilePath := z.getDataFilePathById(tv.DataFileId)
+    dataFilePath := z.getDataFilePathById(tv.dataFileId)
 
     if !z.isDataFilePath(dataFilePath) {
         errMes := fmt.Sprintf("data file %s not exists, can't get value from it.", dataFilePath)
@@ -263,13 +263,13 @@ func (z *ZCask) Get(key string) ([]byte, error) {
         dataFile = z.activeDataFile
     }
 
-    record, err := dataFile.ReadZRecordAt(tv.ZRecordPos)
+    record, err := dataFile.ReadZRecordAt(tv.zRecordPos)
     if err != nil {
         log.Fatalf("read zrecord at data file '%s' failed, details: %v", dataFilePath, err)
         return nil, err
     }
 
-    return record.Value, nil
+    return record.value, nil
 }
 
 func (z *ZCask) Set(key string, value []byte, expiration uint64) error {
@@ -321,7 +321,7 @@ func (z *ZCask) mergeFromDataFile(fid uint64) error {
         if err != nil {
             return err
         }
-        key := string(zr.Key)
+        key := string(zr.key)
         tv, err := z.table.Get(key, timestamp)
         if err == errorKeyNotExisted {
             continue
@@ -329,12 +329,12 @@ func (z *ZCask) mergeFromDataFile(fid uint64) error {
             z.table.Delete(key)
             continue
         }
-        if zr.Header.Timestamp < tv.Timestamp {
+        if zr.header.timestamp < tv.timestamp {
             // old record, pass
             continue
         }
         // valid zrecord, rewrite this record to active data file.
-        err = z.setZRecord(key, zr.Value, tv.Timestamp, tv.Expiration, /*isDelete = */false)
+        err = z.setZRecord(key, zr.value, tv.timestamp, tv.expiration, /*isDelete = */false)
         if err != nil {
             return err
         }
@@ -376,28 +376,28 @@ func (z *ZCask) loadSingleZRecord(odf *OldDataFile, offset int64, timestamp uint
         return nil, err
     }
 
-    key := string(zr.Key)
+    key := string(zr.key)
     tv, err := z.table.GetIncludeExpired(key)
 
     // older operate, pass
-    if err == nil && zr.Header.Timestamp < tv.Timestamp {
+    if err == nil && zr.header.timestamp < tv.timestamp {
         return zr, nil
     }
 
     newtv := TableValue {
-        DataFileId: odf.FileId(),
-        Timestamp:  zr.Header.Timestamp,
-        ZRecordPos: offset,
-        Expiration: zr.Header.Expiration,
-        IsDeleted:  false,
+        dataFileId: odf.FileId(),
+        timestamp:  zr.header.timestamp,
+        zRecordPos: offset,
+        expiration: zr.header.expiration,
+        isDeleted:  false,
     }
 
-    if zr.Header.ValueSize == 0 {
+    if zr.header.valueSize == 0 {
         // is a delete record, set IsDeleted
-        newtv.IsDeleted = true
-    } else if zr.Header.Expiration > 0 && zr.Header.Expiration <= timestamp {
+        newtv.isDeleted = true
+    } else if zr.header.expiration > 0 && zr.header.expiration <= timestamp {
         // record was expired, ignore, set IsDeleted
-        newtv.IsDeleted = true
+        newtv.isDeleted = true
     }
 
     z.table.Set(key, &newtv)
@@ -431,7 +431,7 @@ func (z *ZCask) loadFromHintFile(fileId uint64, filePath string) error {
             return err
         }
 
-        _, err := z.loadSingleZRecord(odf, zhr.Header.ZRecordPos, timestamp)
+        _, err := z.loadSingleZRecord(odf, zhr.header.zRecordPos, timestamp)
         if err != nil {
             return err
         }
@@ -465,12 +465,12 @@ func (z *ZCask) loadFromDataFile(fileId uint64, filePath string) error {
 
 func (z *ZCask) setZRecord(key string, value []byte, timestamp, expiration uint64, isDelete bool) error {
     keySize := uint32(len(key))
-    if keySize == 0 || keySize > z.option.MaxKeySize {
+    if keySize == 0 || keySize > z.option.maxKeySize {
         return errors.New("key size is invalid.")
     }
 
     valueSize := uint32(len(value))
-    if valueSize > z.option.MaxValueSize || (!isDelete && valueSize == 0) {
+    if valueSize > z.option.maxValueSize || (!isDelete && valueSize == 0) {
         return errors.New("value size is invalid.")
     }
 
@@ -487,7 +487,7 @@ func (z *ZCask) setZRecord(key string, value []byte, timestamp, expiration uint6
         // still set a delete record to data file and remove from hash table.
     }
 
-    if int64(recordSize) + z.activeDataFile.Size() > z.option.MaxDataFileSize {
+    if int64(recordSize) + z.activeDataFile.Size() > z.option.maxDataFileSize {
         if err := z.freezeActiveDataFile(); err != nil {
             log.Fatal("freeze active data file failed, details: %v", err)
         }
@@ -511,11 +511,11 @@ func (z *ZCask) setZRecord(key string, value []byte, timestamp, expiration uint6
     fileId := z.activeDataFile.FileId()
 
     tv := TableValue {
-        DataFileId: fileId,
-        ZRecordPos: offset,
-        Timestamp:  timestamp,
-        Expiration: expiration,
-        IsDeleted:  false,
+        dataFileId: fileId,
+        zRecordPos: offset,
+        timestamp:  timestamp,
+        expiration: expiration,
+        isDeleted:  false,
     }
     z.table.Set(key, &tv)
     z.activeTable.Set(key, &tv)
@@ -545,7 +545,7 @@ func (z *ZCask) freezeActiveDataFile() error {
 
 func (z *ZCask) renewActiveDataFile() error {
     // renew a active data file
-    newaf, err := NewActiveDataFile(z.option.DataFileDirectory, z.option.WriteBufferSize)
+    newaf, err := NewActiveDataFile(z.option.dataFileDirectory, z.option.writeBufferSize)
     if err != nil {
         return err
     }
@@ -565,7 +565,7 @@ func (z *ZCask) makeHintFile(activeTable *HashTable, fileId uint64, filePath str
     defer z.wgHinting.Done()
     defer activeTable.Release()
 
-    wbs := z.option.WriteBufferSize
+    wbs := z.option.writeBufferSize
     whf, err := NewWritableHintFile(fileId, filePath, wbs)
     if err != nil {
         return err
@@ -633,12 +633,12 @@ func (z *ZCask) isOldDataFilePath(path string) bool {
 
 func (z *ZCask) getDataFilePathById(id uint64) string {
     n := strconv.FormatUint(id, 10)
-    return path.Join(z.option.DataFileDirectory, n + ZDataFileSuffix)
+    return path.Join(z.option.dataFileDirectory, n + ZDataFileSuffix)
 }
 
 func (z *ZCask) getHintFilePathById(id uint64) string {
     n := strconv.FormatUint(id, 10)
-    return path.Join(z.option.DataFileDirectory, n + ZHintFileSuffix)
+    return path.Join(z.option.dataFileDirectory, n + ZHintFileSuffix)
 }
 
 func (z *ZCask) parseDataFileIdByPath(path string) (uint64, error) {

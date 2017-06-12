@@ -103,14 +103,16 @@ func TestZCaskComprehensive(t *testing.T) {
 
     // zcask configuration
     opt := Option {
-        DataFileDirectory: testDataDirectory,
-        MinDataFileId: 0,
-        MaxDataFileId: 12345678901234567890,
-        MaxKeySize: 1024,
-        MaxValueSize: 1024,
-        MaxDataFileSize: 32 << 20,
-        WriteBufferSize: 4 << 20,
-        IsLoadOldDataFile: false,
+        dataFileDirectory: testDataDirectory,
+        minDataFileId: 0,
+        maxDataFileId: 12345678901234567890,
+        maxKeySize: 1024,
+        maxValueSize: 1024,
+        maxDataFileSize: 32 << 20,
+        writeBufferSize: 4 << 20,
+        isLoadOldDataFile: false,
+        maxOpenOldDataFile: 128,
+        maxCacheOldDataFile: 4,
     }
 
     z, err := NewZCask(opt)
@@ -193,7 +195,7 @@ func TestZCaskComprehensive(t *testing.T) {
     }
 
     // testing Load
-    opt.IsLoadOldDataFile = true
+    opt.isLoadOldDataFile = true
     z, err = NewZCask(opt)
     err = z.Start()
     if err != nil {
@@ -303,14 +305,16 @@ func initZCaskForBenchmark() {
     // zcask configuration
     var err error
     opt := Option {
-        DataFileDirectory: dataFileDirectoryForBenchmark,
-        MinDataFileId:      0,
-        MaxDataFileId:      12345678901234567890,
-        MaxKeySize:         10240,
-        MaxValueSize:       10240,
-        MaxDataFileSize:    1024*1024*32,
-        WriteBufferSize:    1024*1024*4,
-        IsLoadOldDataFile:  false,
+        dataFileDirectory: dataFileDirectoryForBenchmark,
+        minDataFileId:      0,
+        maxDataFileId:      12345678901234567890,
+        maxKeySize:         10240,
+        maxValueSize:       10240,
+        maxDataFileSize:    1024*1024*32,
+        writeBufferSize:    1024*1024*4,
+        isLoadOldDataFile:  false,
+        maxOpenOldDataFile: 128,
+        maxCacheOldDataFile: 128,
     }
 
     zForBenchmark, err = NewZCask(opt)
@@ -384,14 +388,16 @@ func TestGetEveryKey(t *testing.T) {
 
     // zcask configuration
     opt := Option {
-        DataFileDirectory: testDataDirectory,
-        MinDataFileId: 0,
-        MaxDataFileId: 12345678901234567890,
-        MaxKeySize: 1024,
-        MaxValueSize: 1024,
-        MaxDataFileSize: 1024*512,
-        WriteBufferSize: 1024,
-        IsLoadOldDataFile: false,
+        dataFileDirectory: testDataDirectory,
+        minDataFileId: 0,
+        maxDataFileId: 12345678901234567890,
+        maxKeySize: 1024,
+        maxValueSize: 1024,
+        maxDataFileSize: 1024*512,
+        writeBufferSize: 1024,
+        isLoadOldDataFile: false,
+        maxOpenOldDataFile: 128,
+        maxCacheOldDataFile: 4,
     }
 
     z, err := NewZCask(opt)
@@ -444,14 +450,16 @@ func TestRandomSetAndGetAndDelete(t *testing.T) {
 
     // zcask configuration
     opt := Option {
-        DataFileDirectory: testDataDirectory,
-        MinDataFileId: 0,
-        MaxDataFileId: 12345678901234567890,
-        MaxKeySize: 1024,
-        MaxValueSize: 10240,
-        MaxDataFileSize: 32 << 20,
-        WriteBufferSize: 4 << 20,
-        IsLoadOldDataFile: false,
+        dataFileDirectory: testDataDirectory,
+        minDataFileId: 0,
+        maxDataFileId: 12345678901234567890,
+        maxKeySize: 1024,
+        maxValueSize: 10240,
+        maxDataFileSize: 32 << 20,
+        writeBufferSize: 4 << 20,
+        isLoadOldDataFile: false,
+        maxOpenOldDataFile: 128,
+        maxCacheOldDataFile: 4,
     }
 
     z, err := NewZCask(opt)

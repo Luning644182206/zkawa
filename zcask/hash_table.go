@@ -11,12 +11,12 @@ import (
 )
 
 type TableValue struct {
-    DataFileId  uint64
-    Timestamp   uint64
-    Expiration  uint64
-    ZRecordPos  int64
+    dataFileId  uint64
+    timestamp   uint64
+    expiration  uint64
+    zRecordPos  int64
     // deleted flag only use for zcask.Load.
-    IsDeleted   bool
+    isDeleted   bool
 }
 
 type HashTable struct {
@@ -38,7 +38,7 @@ func (ht *HashTable) Get(key string, timestamp uint64) (*TableValue, error) {
     // IsDeleted only use in zcask.Load
     // don't check it in hash_table.Get
 
-    if tv.Expiration > 0 && tv.Expiration <= timestamp {
+    if tv.expiration > 0 && tv.expiration <= timestamp {
         return nil, errorKeyExpired
     }
 
@@ -76,7 +76,7 @@ func (ht *HashTable) Delete(key string) error {
 func (ht *HashTable) RemoveInvalidKeys() error {
     keys := make([]string, 0, 1024)
     for k, v := range ht.table {
-        if v.IsDeleted {
+        if v.isDeleted {
             keys = append(keys, k)
         }
     }

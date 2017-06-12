@@ -7,55 +7,14 @@
 package zcask
 
 import (
-    "encoding/binary"
     "errors"
     "fmt"
     "os"
 )
 
 const (
-    ZHintFileSuffix                     = ".zhint"
-
-    ZHintRecordHeaderSize               = 37
-
-    ZHintRecordHeaderDataFileIdBegin    = 0
-    ZHintRecordHeaderDataFileIdEnd      = 8
-
-    ZHintRecordHeaderTimestampBegin     = 8
-    ZHintRecordHeaderTimestampEnd       = 16
-
-    ZHintRecordHeaderExpirationBegin    = 16
-    ZHintRecordHeaderExpirationEnd      = 24
-
-    ZHintRecordHeaderZRecordPosBegin    = 24
-    ZHintRecordHeaderZRecordPosEnd      = 32
-
-    ZHintRecordHeaderIsDeletedBegin     = 32
-    ZHintRecordHeaderIsDeletedEnd       = 33
-
-    ZHintRecordHeaderKeySizeBegin       = 33
-    ZHintRecordHeaderKeySizeEnd         = 37
+    ZHintFileSuffix = ".zhint"
 )
-
-type ZHintRecordHeader struct {
-    // Header: 37 bytes
-    // -------------------------------------------------------------------------
-    // |8            |8         |8          |8           |1          |4        |
-    // -------------------------------------------------------------------------
-    // |data file id |timestamp |expiration |zrecord pos |is deleted |key size |
-    // -------------------------------------------------------------------------
-    DataFileId      uint64
-    Timestamp       uint64
-    Expiration      uint64
-    ZRecordPos      int64
-    IsDeleted       bool
-    KeySize         uint32
-}
-
-type ZHintRecord struct {
-    Header      ZHintRecordHeader
-    Key         []byte
-}
 
 type ReadableHintFile struct {
     f           *os.File
@@ -155,15 +114,15 @@ func (rhf *ReadableHintFile) ReadZHintRecordAt(offset int64) (*ZHintRecord, erro
         return nil, err
     }
 
-    kbytes := make([]byte, header.KeySize)
+    kbytes := make([]byte, header.keySize)
     _, err = rhf.f.ReadAt(kbytes, offset + ZRecordHeaderSize)
     if err != nil {
         return nil, err
     }
 
     return &ZHintRecord {
-        Header: *header,
-        Key: kbytes,
+        header: *header,
+        key:    kbytes,
     }, nil
 
 }
@@ -201,62 +160,4 @@ func (whf *WritableHintFile) Close() error {
     }
 
     return nil
-}
-
-func (zhr *ZHintRecord) Size() uint32 {
-    return uint32(ZHintRecordHeaderSize) + uint32(len(zhr.Key))
-}
-
-func encodeZHintRecordHeader(key []byte, tv *TableValue) ([]byte, error) {
-    header := make([]byte, ZHintRecordHeaderSize)
-
-    // fill header
-    binary.LittleEndian.PutUint64(
-        header[ZHintRecordHeaderDataFileIdBegin:ZHintRecordHeaderDataFileIdEnd],
-        tv.DataFileId)
-    binary.LittleEndian.PutUint64(
-        header[ZHintRecordHeaderTimestampBegin:ZHintRecordHeaderTimestampEnd],
-        tv.Timestamp)
-    binary.LittleEndian.PutUint64(
-        header[ZHintRecordHeaderExpirationBegin:ZHintRecordHeaderExpirationEnd],
-        tv.Expiration)
-
-    if tv.IsDeleted {
-        header[ZHintRecordHeaderIsDeletedBegin] = 1
-    } else {
-        header[ZHintRecordHeaderIsDeletedBegin] = 0
-    }
-
-    binary.LittleEndian.PutUint64(
-        header[ZHintRecordHeaderZRecordPosBegin:ZHintRecordHeaderZRecordPosEnd],
-        uint64(tv.ZRecordPos))
-    binary.LittleEndian.PutUint32(
-        header[ZHintRecordHeaderKeySizeBegin:ZHintRecordHeaderKeySizeEnd],
-        uint32(len(key)))
-
-    return header, nil
-}
-
-
-func decodeZHintRecordHeader(buffer []byte) (*ZHintRecordHeader, error) {
-    var isDeleted bool
-    if buffer[ZHintRecordHeaderIsDeletedBegin] == 1 {
-        isDeleted = true
-    } else {
-        isDeleted = false
-    }
-
-    return &ZHintRecordHeader {
-        DataFileId: binary.LittleEndian.Uint64(
-                        buffer[ZHintRecordHeaderDataFileIdBegin:ZHintRecordHeaderDataFileIdEnd]),
-        Timestamp:  binary.LittleEndian.Uint64(
-                        buffer[ZHintRecordHeaderTimestampBegin:ZHintRecordHeaderTimestampEnd]),
-        ZRecordPos: int64(binary.LittleEndian.Uint64(
-                        buffer[ZHintRecordHeaderZRecordPosBegin:ZHintRecordHeaderZRecordPosEnd])),
-        IsDeleted:  isDeleted,
-        Expiration: binary.LittleEndian.Uint64(
-                        buffer[ZHintRecordHeaderExpirationBegin:ZHintRecordHeaderExpirationEnd]),
-        KeySize:    binary.LittleEndian.Uint32(
-                        buffer[ZHintRecordHeaderKeySizeBegin:ZHintRecordHeaderKeySizeEnd]),
-    }, nil
 }

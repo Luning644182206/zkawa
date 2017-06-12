@@ -2,17 +2,121 @@
 // All rights reserved.
 //
 // Author: Zheng Gonglin <scaugrated@gmail.com>
-// Created: 2017/06/02
+// Created: 2017/02/18
 
 package zcask
 
 import (
     "errors"
     "fmt"
-    "log"
     "io"
+    "log"
     "os"
+    "path"
 )
+
+const (
+    ZDataFileSuffix         = ".zdata"
+)
+
+type ZDataFile interface {
+    Size()  int64           // size of file
+    Path() string           // return path
+    FileId() uint64         // return fileId
+    Close() error
+
+    ReadZRecordAt(offset int64) (*ZRecord, error)
+    ReadRawBytesAt(data []byte, offset int64) (int, error)
+}
+
+type ActiveDataFile struct {
+    f           *FileWithBuffer
+    fileId      uint64
+    path        string
+}
+
+func NewActiveDataFile(dataFileDirectory string, writeBufferSize uint32) (*ActiveDataFile, error) {
+    unixNano := getCurrentUnixNano()
+    baseFileName := fmt.Sprintf("%d%s", unixNano, ZDataFileSuffix)
+    filePath := path.Join(dataFileDirectory, baseFileName)
+
+    f, err := os.OpenFile(filePath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
+    if err != nil {
+        return nil, err
+    }
+
+    fwb, err := NewFileWithBuffer(f, writeBufferSize)
+    if err != nil {
+        return nil, err
+    }
+
+    return &ActiveDataFile {
+        f:      fwb,
+        fileId: unixNano,
+        path:   filePath,
+    }, nil
+}
+
+func (adf *ActiveDataFile) Size() int64 {
+    return adf.f.Size()
+}
+
+func (adf *ActiveDataFile) Path() string {
+    return adf.path
+}
+
+func (adf *ActiveDataFile) FileId() uint64 {
+    return adf.fileId
+}
+
+func (adf *ActiveDataFile) WriteZRecord(key []byte, value []byte, timestamp, expiration uint64) (int64, error) {
+    keySize := len(key)
+    valueSize := len(value)
+
+    header, err := encodeZRecordHeader(key, value, timestamp, expiration)
+    if err != nil {
+        return 0, err
+    }
+
+    offset := adf.f.Size()
+
+    writedBytes, err := adf.f.Write(header)
+    if err != nil || writedBytes != ZRecordHeaderSize {
+        return -1, err
+    }
+
+    writedBytes, err = adf.f.Write(key)
+    if err != nil || writedBytes != keySize {
+        return -1, err
+    }
+
+    writedBytes, err = adf.f.Write(value)
+    if err != nil || writedBytes != valueSize {
+        return -1, err
+    }
+
+    return offset, nil
+}
+
+func (adf *ActiveDataFile) ReadZRecordAt(offset int64) (*ZRecord, error) {
+    if offset >= adf.f.Size() {
+        errMes := "offset exceed the size of active data file."
+        return nil, errors.New(errMes)
+    }
+
+    return readZRecordAt(adf, offset)
+}
+
+func (adf *ActiveDataFile) ReadRawBytesAt(data []byte, offset int64) (int, error) {
+    return adf.f.ReadAt(data, offset)
+}
+
+func (adf *ActiveDataFile) Close() error {
+    if err := adf.f.Close(); err != nil {
+        return err
+    }
+    return nil
+}
 
 type FileWithBuffer struct {
     f               *os.File

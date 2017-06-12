@@ -1,36 +1,35 @@
 **RandomSet:**
 
 ```
-100000 set operation[key: 9B, value: 2048B] in 0.320026s
-average 312474.883855 qps
-average 637.448763 MB/s
-average 3.200257 micros/op
+100000 set operation[key: 9B, value: 2048B] in 0.320759s
+average 311760.379675 qps
+average 635.991175 MB/s
+average 3.207592 micros/op
 ```
-
 
 **RandomGet:**
 
 ```
-100000 get operation in 0.682308s
-average 146561.287186 qps
-average 6.823084 micros/op
+100000 get operation in 0.663533s
+average 150708.328087 qps
+average 6.635333 micros/op
 ```
 
 
 **RandomGetWhenMerge:**
 
 ```
-100000 get operation in 1.189420s
-average 84074.610698 qps
-average 11.894197 micros/op
+100000 get operation in 1.108773s
+average 90189.750008 qps
+average 11.087734 micros/op
 ```
 
 
 **RandomSetWhenMerge:**
 
 ```
-100000 set operation[key: 9B, value: 2048B] in 0.810483s
-average 123383.262838 qps
-average 251.701856 MB/s
-average 8.104827 micros/op
+100000 set operation[key: 9B, value: 2048B] in 0.986591s
+average 101359.118131 qps
+average 206.772601 MB/s
+average 9.865911 micros/op
 ```
