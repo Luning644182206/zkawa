@@ -2,7 +2,7 @@
 a Go implementation of key-value storage system based on bitcask model.
 
 ## Go version
-go1.7.3 linux/amd64
+go1.7.6 linux/amd64
 
 ## Why zkawa
 This storage is dedicated to a very special friend **Z**hehao. **Kawa**, the Japanese word for cuteness.

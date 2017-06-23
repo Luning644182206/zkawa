@@ -196,11 +196,11 @@ func (z *ZCask) Load() error {
 
 func (z *ZCask) Merge() error {
     // make sure only one merge running
-	if !atomic.CompareAndSwapInt32(&z.isMerging, 0, 1) {
-		log.Printf("there is a merge process running.")
-		return nil
-	}
-	defer atomic.CompareAndSwapInt32(&z.isMerging, 1, 0)
+    if !atomic.CompareAndSwapInt32(&z.isMerging, 0, 1) {
+        log.Printf("there is a merge process running.")
+        return nil
+    }
+    defer atomic.CompareAndSwapInt32(&z.isMerging, 1, 0)
 
     z.rwMutex.Lock()
     fis, err := ioutil.ReadDir(z.option.dataFileDirectory)
